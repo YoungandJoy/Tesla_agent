@@ -34,10 +34,8 @@ async function sendTelegram(message) {
 async function callClaude(sys, usr) {
   const res = await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({systemPrompt:sys,userMessage:usr})});
   const data = await res.json();
-  const text = (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error("JSON 파싱 실패");
-  return JSON.parse(m[0]);
+  if (data.error) throw new Error(data.error);
+  return data;
 }
 
 const ScoreBar = ({score}) => {

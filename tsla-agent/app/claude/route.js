@@ -9,7 +9,7 @@ export async function POST(req) {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-5-20251001",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 2500,
       tools: [{ type: "web_search_20250305", name: "web_search" }],
       system: systemPrompt,
@@ -18,5 +18,27 @@ export async function POST(req) {
   });
 
   const data = await res.json();
-  return Response.json(data);
+
+  // 모든 텍스트 블록 합치기
+  let text = "";
+  if (data.content && Array.isArray(data.content)) {
+    for (const block of data.content) {
+      if (block.type === "text") {
+        text += block.text;
+      }
+    }
+  }
+
+  // JSON 추출
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) {
+    return Response.json({ error: "JSON not found", raw: text.slice(0, 500) }, { status: 500 });
+  }
+
+  try {
+    const parsed = JSON.parse(match[0]);
+    return Response.json(parsed);
+  } catch (e) {
+    return Response.json({ error: "Parse failed", raw: match[0].slice(0, 500) }, { status: 500 });
+  }
 }

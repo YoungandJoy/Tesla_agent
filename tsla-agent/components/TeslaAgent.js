@@ -1,542 +1,283 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// ── 설정값 (Young Oh 계좌) ─────────────────────────────────────
-const TG_TOKEN = "8750913612:AAH3FLdPBv9uD0SEVqifi0htU7lKkISFVQM";
+const TG_TOKEN  = "8750913612:AAH3FLdPBv9uD0SEVqifi0htU7lKkISFVQM";
 const TG_CHAT_ID = "8494338776";
+const PORTFOLIO = { shares: 70.355084, avg_price_krw: 568544, eval_amount: 38342676 };
+const STOP_LOSS_KRW = Math.round(PORTFOLIO.avg_price_krw * 0.93);
+const ALERT_KRW     = Math.round(PORTFOLIO.avg_price_krw * 0.95);
 
-const PORTFOLIO = {
-  shares: 70.355084,
-  avg_price_krw: 568544,
-  eval_amount: 38342676,
-  unrealized_pct: -4.14,
-};
-
-const STOP_LOSS_KRW = Math.round(PORTFOLIO.avg_price_krw * 0.93); // -7%
-const ALERT_KRW     = Math.round(PORTFOLIO.avg_price_krw * 0.95); // -5% 경보
-
-// ── 프롬프트 ──────────────────────────────────────────────────
 const SIGNAL_PROMPT = `당신은 테슬라(TSLA) 전문 퀀트 트레이더 AI입니다.
-
 【실제 보유 현황 - 한국투자증권 Young Oh】
-- 보유수량: 70.355084주 / 평균구매가: ₩568,544
-- 평가금액: ₩38,342,676 / 손절라인: ₩528,746 (-7%)
-- 경보라인: ₩540,117 (-5%)
+- 보유수량: 70.355084주 / 평균구매가: ₩568,544 / 손절라인: ₩528,746 (-7%)
+웹 검색으로 ①TSLA 현재가(USD) ②원달러 환율 ③S&P500/나스닥 ④공포탐욕지수 ⑤테슬라 뉴스 ⑥경제지표를 수집 후 JSON으로만 응답:
+{"action":"BUY"|"SELL"|"HOLD"|"PARTIAL_SELL","confidence":0~100,"urgency":"LOW"|"MEDIUM"|"HIGH","tsla_usd":숫자,"tsla_krw":숫자,"usd_krw":숫자,"sp500":숫자,"sp500_chg_pct":숫자,"nasdaq":숫자,"nasdaq_chg_pct":숫자,"fear_greed":숫자,"fear_greed_label":"문자열","target_price_krw":숫자,"stop_loss_krw":숫자,"position_change":"설명","signal_breakdown":{"geopolitics":{"score":-10~10,"summary":"한국어"},"tesla_news":{"score":-10~10,"summary":"한국어"},"technical":{"score":-10~10,"summary":"한국어"},"macro":{"score":-10~10,"summary":"한국어"}},"key_risks":["리스크1","리스크2","리스크3"],"reasoning":"한국어 250자 이내","telegram_message":"3줄 이내 알림 이모지 포함","next_trigger":"다음 이벤트"}`;
 
-웹 검색으로 ① TSLA 현재가 ② 최신 테슬라 뉴스 ③ 미국 경제지표 ④ 지정학 리스크를 수집 후,
-반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 금지):
-
-{
-  "action": "BUY"|"SELL"|"HOLD"|"PARTIAL_SELL",
-  "confidence": 0~100,
-  "urgency": "LOW"|"MEDIUM"|"HIGH",
-  "current_price_krw": 숫자,
-  "target_price_krw": 숫자,
-  "stop_loss_krw": 숫자,
-  "position_change": "설명",
-  "signal_breakdown": {
-    "geopolitics": {"score": -10~10, "summary": "한국어"},
-    "tesla_news":  {"score": -10~10, "summary": "한국어"},
-    "technical":   {"score": -10~10, "summary": "한국어"},
-    "macro":       {"score": -10~10, "summary": "한국어"}
-  },
-  "key_risks": ["리스크1","리스크2","리스크3"],
-  "reasoning": "한국어 250자 이내 종합 판단",
-  "telegram_message": "3줄 이내 알림 메시지 (이모지 포함)",
-  "next_trigger": "다음 주목 이벤트"
-}`;
+const MORNING_PROMPT = `당신은 Young Oh의 투자 AI 비서입니다.
+웹 검색으로 오늘 아침 브리핑 데이터를 수집 후 JSON으로만 응답:
+{"date":"날짜","tsla_usd":숫자,"tsla_krw":숫자,"tsla_chg_pct":숫자,"usd_krw":숫자,"usd_krw_chg_pct":숫자,"sp500":숫자,"sp500_chg_pct":숫자,"nasdaq":숫자,"nasdaq_chg_pct":숫자,"fear_greed":숫자,"fear_greed_label":"문자열","today_events":["이벤트1","이벤트2"],"tsla_news":["뉴스1","뉴스2","뉴스3"],"strategy":"오늘 투자 전략 200자 이내","telegram_morning":"아침 브리핑 5줄 이내 이모지 포함"}`;
 
 const WEEKLY_PROMPT = `당신은 테슬라(TSLA) 전문 애널리스트입니다.
+웹 검색으로 이번 주 종합 분석 후 JSON으로만 응답:
+{"week":"YYYY-MM-DD 주간","tsla_summary":"테슬라 주요 이슈 3~5줄","market_summary":"거시경제 지정학 3~5줄","ev_competition":"EV 경쟁 2~3줄","technical_outlook":"기술적 전망 2~3줄","weekly_action":"BUY"|"SELL"|"HOLD","weekly_confidence":0~100,"price_range":{"support":숫자,"resistance":숫자},"key_events_next_week":["이벤트1","이벤트2","이벤트3"],"telegram_weekly":"주간 리포트 요약 5줄 이내 이모지 포함"}`;
 
-웹 검색으로 이번 주 다음 항목들을 종합 조사하세요:
-1. 테슬라 주요 뉴스 (어닝콜, 생산/인도량, 신모델, CEO 발언)
-2. 전기차 시장 동향 (BYD, Rivian 경쟁)
-3. 미국 거시경제 (금리, 인플레이션, 고용, 관세)
-4. 세계 지정학 (미중 무역전쟁, 에너지, 전쟁)
-5. TSLA 기술적 분석 (주간 지지/저항선)
-
-반드시 아래 JSON으로만 응답하세요:
-{
-  "week": "YYYY-MM-DD 주간",
-  "tsla_summary": "테슬라 주요 이슈 3~5줄",
-  "market_summary": "거시경제/지정학 3~5줄",
-  "ev_competition": "EV 경쟁 현황 2~3줄",
-  "technical_outlook": "기술적 전망 2~3줄",
-  "weekly_action": "BUY"|"SELL"|"HOLD",
-  "weekly_confidence": 0~100,
-  "price_range": {"support": 숫자, "resistance": 숫자},
-  "key_events_next_week": ["이벤트1","이벤트2","이벤트3"],
-  "telegram_weekly": "텔레그램 주간 리포트 요약 (5줄 이내, 이모지 포함)"
-}`;
-
-// ── 유틸 ──────────────────────────────────────────────────────
-const fmt = (n) => n ? `₩${Number(n).toLocaleString()}` : "-";
+const fmt    = n => n ? `₩${Number(n).toLocaleString()}` : "—";
+const fmtUsd = n => n ? `$${Number(n).toFixed(2)}` : "—";
+const fmtPct = n => n !== undefined ? `${n>=0?"+":""}${Number(n).toFixed(2)}%` : "—";
+const fmtNum = n => n ? Number(n).toLocaleString() : "—";
+const fgColor = v => !v?"#5566aa":v<=25?"#ff5252":v<=45?"#ff9800":v<=55?"#ffd740":v<=75?"#8bc34a":"#00e676";
+const fgLabel = v => !v?"—":v<=25?"극도공포":v<=45?"공포":v<=55?"중립":v<=75?"탐욕":"극도탐욕";
 
 async function sendTelegram(message) {
-  try {
-    await fetch("/api/telegram", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: TG_TOKEN, chatId: TG_CHAT_ID, message }),
-    });
-  } catch (_) {}
+  try { await fetch("/api/telegram",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:TG_TOKEN,chatId:TG_CHAT_ID,message})}); } catch(_){}
 }
-
-async function callClaude(systemPrompt, userMsg) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2500,
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMsg }],
-    }),
-  });
+async function callClaude(sys, usr) {
+  const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2500,tools:[{type:"web_search_20250305",name:"web_search"}],system:sys,messages:[{role:"user",content:usr}]})});
   const data = await res.json();
-  const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("");
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("JSON 파싱 실패");
-  return JSON.parse(match[0]);
+  const text = (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("JSON 파싱 실패");
+  return JSON.parse(m[0]);
 }
 
-const ScoreBar = ({ score }) => {
-  const pct = ((score + 10) / 20) * 100;
-  const c = score > 3 ? "#00e676" : score < -3 ? "#ff5252" : "#ffd740";
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <div style={{ flex: 1, height: 5, background: "#1c1c2e", borderRadius: 3, overflow: "hidden" }}>
-        <div style={{ width: `${pct}%`, height: "100%", background: c, transition: "width 1s ease", borderRadius: 3 }} />
-      </div>
-      <span style={{ color: c, fontFamily: "monospace", fontSize: 12, width: 28, textAlign: "right", fontWeight: 700 }}>
-        {score > 0 ? `+${score}` : score}
-      </span>
-    </div>
-  );
+const ScoreBar = ({score}) => {
+  const pct=((score+10)/20)*100, c=score>3?"#00e676":score<-3?"#ff5252":"#ffd740";
+  return <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{flex:1,height:5,background:"#1c1c2e",borderRadius:3,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:c,transition:"width 1s ease",borderRadius:3}}/></div><span style={{color:c,fontFamily:"monospace",fontSize:12,width:28,textAlign:"right",fontWeight:700}}>{score>0?`+${score}`:score}</span></div>;
 };
 
-// ── 메인 컴포넌트 ─────────────────────────────────────────────
 export default function TeslaAgent() {
-  const [analysis, setAnalysis]     = useState(null);
-  const [weekly, setWeekly]         = useState(null);
-  const [loading, setLoading]       = useState(false);
-  const [weeklyLoading, setWeeklyLoading] = useState(false);
-  const [log, setLog]               = useState([]);
-  const [lastUpdated, setLastUpdated] = useState(null);
-  const [autoMode, setAutoMode]     = useState(false);
-  const [tab, setTab]               = useState("signal");
-  const [mainTab, setMainTab]       = useState("signal"); // signal | weekly
-  const [autoMin, setAutoMin]       = useState(30);
-  const intervalRef = useRef(null);
-  const weeklyRef   = useRef(null);
-  const logRef      = useRef(null);
+  const [analysis,setAnalysis]=useState(null), [morning,setMorning]=useState(null), [weekly,setWeekly]=useState(null);
+  const [loading,setLoading]=useState(false), [mLoad,setMLoad]=useState(false), [wLoad,setWLoad]=useState(false);
+  const [log,setLog]=useState([]), [lastUp,setLastUp]=useState(null);
+  const [autoMode,setAutoMode]=useState(false), [autoMin,setAutoMin]=useState(30);
+  const [mainTab,setMainTab]=useState("signal"), [sigTab,setSigTab]=useState("signal");
+  const [prevFx,setPrevFx]=useState(null), [prevTsla,setPrevTsla]=useState(null);
+  const iRef=useRef(null), mRef=useRef(null), wRef=useRef(null), logRef=useRef(null);
 
-  const addLog = useCallback((msg, type = "info") => {
-    const time = new Date().toLocaleTimeString("ko-KR");
-    setLog(p => [...p.slice(-99), { time, msg, type }]);
-    setTimeout(() => logRef.current?.scrollTo(0, logRef.current.scrollHeight), 60);
-  }, []);
+  const addLog=useCallback((msg,type="info")=>{
+    const time=new Date().toLocaleTimeString("ko-KR");
+    setLog(p=>[...p.slice(-99),{time,msg,type}]);
+    setTimeout(()=>logRef.current?.scrollTo(0,logRef.current.scrollHeight),60);
+  },[]);
 
-  // ── 신호 분석 ────────────────────────────────────────────────
-  const runSignal = useCallback(async (silent = false) => {
-    if (loading) return;
-    setLoading(true);
-    if (!silent) addLog("⚡ AI 분석 시작...", "info");
-    addLog("🌐 웹서치: TSLA 시세 + 뉴스 수집 중...", "info");
-    try {
-      const result = await callClaude(SIGNAL_PROMPT,
-        "지금 즉시 웹 검색으로 TSLA 현재가, 최신 뉴스, 거시경제, 지정학 리스크를 조사하고 JSON으로 응답하세요."
-      );
-      setAnalysis(result);
-      setLastUpdated(new Date());
-
-      const emoji = result.action === "BUY" ? "🟢" : result.action?.includes("SELL") ? "🔴" : "🟡";
-      addLog(`${emoji} ${result.action} | 확신도 ${result.confidence}% | 긴급도 ${result.urgency}`, result.action === "BUY" ? "success" : result.action?.includes("SELL") ? "danger" : "warn");
-
-      // 현재가 기반 경보 체크
-      const cp = result.current_price_krw;
-      if (cp && cp <= STOP_LOSS_KRW) {
-        addLog(`🚨 손절라인 도달! ${fmt(cp)} ≤ ${fmt(STOP_LOSS_KRW)}`, "danger");
-        await sendTelegram(`🚨 <b>손절라인 도달!</b>\n\n현재가: ${fmt(cp)}\n손절라인: ${fmt(STOP_LOSS_KRW)} (-7%)\n\n즉시 매도 검토 필요!`);
-      } else if (cp && cp <= ALERT_KRW) {
-        addLog(`⚠️ 경보! 현재가 ${fmt(cp)} — -5% 근접`, "warn");
-        await sendTelegram(`⚠️ <b>손절 경보 (-5%)</b>\n현재가: ${fmt(cp)}\n손절라인까지: ${fmt(cp - STOP_LOSS_KRW)} 남음`);
+  const runSignal=useCallback(async(silent=false)=>{
+    if(loading)return; setLoading(true);
+    if(!silent)addLog("⚡ AI 분석 시작...","info");
+    addLog("🌐 시세·환율·지수 수집 중...","info");
+    try{
+      const r=await callClaude(SIGNAL_PROMPT,"TSLA 현재가, 원달러 환율, S&P500, 나스닥, 공포탐욕지수, 테슬라 뉴스를 검색하고 JSON으로 응답하세요.");
+      setAnalysis(r); setLastUp(new Date());
+      if(prevFx&&r.usd_krw){const c=Math.abs((r.usd_krw-prevFx)/prevFx*100);if(c>=1){await sendTelegram(`⚠️ <b>환율 급변!</b>\n${c.toFixed(2)}% 변동\n현재: ₩${r.usd_krw?.toLocaleString()}`);addLog(`⚠️ 환율 급변 ${c.toFixed(2)}%`,"warn");}}
+      if(r.usd_krw)setPrevFx(r.usd_krw);
+      if(prevTsla&&r.tsla_usd){const c=Math.abs((r.tsla_usd-prevTsla)/prevTsla*100);if(c>=3){const d=r.tsla_usd>prevTsla?"🚀 급등":"🔻 급락";await sendTelegram(`${d} <b>TSLA ${c.toFixed(1)}%!</b>\n현재가: $${r.tsla_usd} (${fmt(r.tsla_krw)})`);addLog(`${d} TSLA ${c.toFixed(1)}%`,"warn");}}
+      if(r.tsla_usd)setPrevTsla(r.tsla_usd);
+      const cp=r.tsla_krw;
+      if(cp&&cp<=STOP_LOSS_KRW){await sendTelegram(`🚨 <b>손절라인 도달!</b>\n현재가: ${fmt(cp)}\n손절: ${fmt(STOP_LOSS_KRW)}\n즉시 매도 검토!`);addLog(`🚨 손절라인 도달 ${fmt(cp)}`,"danger");}
+      else if(cp&&cp<=ALERT_KRW){await sendTelegram(`⚠️ <b>손절 경보 -5%</b>\n현재가: ${fmt(cp)}`);addLog(`⚠️ 경보 ${fmt(cp)}`,"warn");}
+      const e=r.action==="BUY"?"🟢":r.action?.includes("SELL")?"🔴":"🟡";
+      addLog(`${e} ${r.action} | ${r.confidence}% | $${r.tsla_usd} | ₩${r.usd_krw?.toLocaleString()}`,r.action==="BUY"?"success":r.action?.includes("SELL")?"danger":"warn");
+      if((r.action!=="HOLD"||silent)&&r.telegram_message){
+        await sendTelegram(`🤖 <b>TSLA AI Signal</b>\n${r.telegram_message}\n💱 환율: ₩${r.usd_krw?.toLocaleString()}\n📊 S&P: ${fmtNum(r.sp500)} (${fmtPct(r.sp500_chg_pct)})\n⏰ ${new Date().toLocaleString("ko-KR")}`);
+        addLog("📨 텔레그램 전송","success");
       }
+    }catch(e){addLog(`❌ ${e.message}`,"danger");}finally{setLoading(false);}
+  },[loading,addLog,prevFx,prevTsla]);
 
-      // BUY/SELL 신호 텔레그램
-      if (result.action !== "HOLD" && result.telegram_message) {
-        const msg = `🤖 <b>TSLA AI Signal</b>\n${result.telegram_message}\n\n💼 평가: ${fmt(cp ? cp * PORTFOLIO.shares : PORTFOLIO.eval_amount)}\n⏰ ${new Date().toLocaleString("ko-KR")}`;
-        await sendTelegram(msg);
-        addLog("📨 텔레그램 신호 전송 완료", "success");
-      } else if (result.action === "HOLD") {
-        // 정기 분석 완료 알림 (30분마다)
-        if (silent) {
-          await sendTelegram(`🟡 <b>TSLA 정기분석</b>\n${result.telegram_message || "현재 HOLD 유지"}\n\n현재가: ${fmt(cp)}\n⏰ ${new Date().toLocaleString("ko-KR")}`);
-          addLog("📨 정기 분석 알림 전송", "success");
-        }
-      }
-    } catch (e) {
-      addLog(`❌ 오류: ${e.message}`, "danger");
-    } finally {
-      setLoading(false);
-    }
-  }, [loading, addLog]);
+  const runMorning=useCallback(async()=>{
+    setMLoad(true);addLog("🌅 아침 브리핑 생성 중...","info");
+    try{
+      const r=await callClaude(MORNING_PROMPT,"오늘 아침 투자 브리핑 JSON으로 생성해주세요.");
+      setMorning(r);setMainTab("morning");addLog("✅ 아침 브리핑 완료","success");
+      if(r.telegram_morning){await sendTelegram(`🌅 <b>오늘의 투자 브리핑</b>\n\n${r.telegram_morning}\n\n⏰ ${new Date().toLocaleString("ko-KR")}`);addLog("📨 브리핑 전송","success");}
+    }catch(e){addLog(`❌ ${e.message}`,"danger");}finally{setMLoad(false);}
+  },[addLog]);
 
-  // ── 주간 리포트 ───────────────────────────────────────────────
-  const runWeekly = useCallback(async () => {
-    setWeeklyLoading(true);
-    addLog("📋 주간 리포트 생성 중...", "info");
-    try {
-      const result = await callClaude(WEEKLY_PROMPT,
-        "이번 주 테슬라 & 세계 금융 정세를 종합 분석하고 JSON으로 응답하세요."
-      );
-      setWeekly(result);
-      setMainTab("weekly");
-      addLog(`✅ 주간 리포트 완료 — ${result.weekly_action} (${result.weekly_confidence}%)`, "success");
+  const runWeekly=useCallback(async()=>{
+    setWLoad(true);addLog("📋 주간 리포트 생성 중...","info");
+    try{
+      const r=await callClaude(WEEKLY_PROMPT,"이번 주 테슬라 & 세계 금융 정세 종합 분석 JSON으로 응답하세요.");
+      setWeekly(r);setMainTab("weekly");addLog(`✅ 주간 — ${r.weekly_action} ${r.weekly_confidence}%`,"success");
+      if(r.telegram_weekly){await sendTelegram(`📊 <b>TSLA 주간 리포트</b>\n\n${r.telegram_weekly}\n\n⏰ ${new Date().toLocaleString("ko-KR")}`);addLog("📨 주간 리포트 전송","success");}
+    }catch(e){addLog(`❌ ${e.message}`,"danger");}finally{setWLoad(false);}
+  },[addLog]);
 
-      if (result.telegram_weekly) {
-        const msg = `📊 <b>TSLA 주간 리포트</b>\n\n${result.telegram_weekly}\n\n⏰ ${new Date().toLocaleString("ko-KR")}`;
-        await sendTelegram(msg);
-        addLog("📨 주간 리포트 텔레그램 전송 완료", "success");
-      }
-    } catch (e) {
-      addLog(`❌ 주간 리포트 오류: ${e.message}`, "danger");
-    } finally {
-      setWeeklyLoading(false);
-    }
-  }, [addLog]);
+  useEffect(()=>{
+    clearInterval(iRef.current);
+    if(autoMode){addLog(`🤖 자동 ON (${autoMin}분)`,"success");sendTelegram(`🤖 <b>TSLA AI Agent 시작</b>\n${autoMin}분 간격 자동 분석\n손절라인: ${fmt(STOP_LOSS_KRW)}`);iRef.current=setInterval(()=>runSignal(true),autoMin*60*1000);}
+    else if(log.length>0)addLog("⏸ 자동 OFF","warn");
+    return()=>clearInterval(iRef.current);
+  },[autoMode,autoMin]);
 
-  // ── 자동 모드 ─────────────────────────────────────────────────
-  useEffect(() => {
-    clearInterval(intervalRef.current);
-    if (autoMode) {
-      addLog(`🤖 자동 분석 ON (${autoMin}분 간격)`, "success");
-      sendTelegram(`🤖 <b>TSLA AI Agent 시작</b>\n자동 분석 ${autoMin}분 간격으로 실행됩니다.\n손절라인: ${fmt(STOP_LOSS_KRW)}`);
-      intervalRef.current = setInterval(() => runSignal(true), autoMin * 60 * 1000);
-    } else if (log.length > 0) {
-      addLog("⏸ 자동 모드 OFF", "warn");
-    }
-    return () => clearInterval(intervalRef.current);
-  }, [autoMode, autoMin]);
+  useEffect(()=>{const c=()=>{const n=new Date();if(n.getHours()===9&&n.getMinutes()<31)runMorning();};mRef.current=setInterval(c,30*60*1000);return()=>clearInterval(mRef.current);},[runMorning]);
+  useEffect(()=>{const c=()=>{const n=new Date();if(n.getDay()===1&&n.getHours()===9&&n.getMinutes()<31)runWeekly();};wRef.current=setInterval(c,30*60*1000);return()=>clearInterval(wRef.current);},[runWeekly]);
 
-  // ── 주간 자동 (매주 월요일 오전 9시 체크) ──────────────────────
-  useEffect(() => {
-    const checkWeekly = () => {
-      const now = new Date();
-      if (now.getDay() === 1 && now.getHours() === 9 && now.getMinutes() < 31) {
-        runWeekly();
-      }
-    };
-    weeklyRef.current = setInterval(checkWeekly, 30 * 60 * 1000);
-    return () => clearInterval(weeklyRef.current);
-  }, [runWeekly]);
+  const cp=analysis?.tsla_krw, evalNow=cp?cp*PORTFOLIO.shares:PORTFOLIO.eval_amount;
+  const pnlPct=cp?((cp/PORTFOLIO.avg_price_krw-1)*100).toFixed(2):"-4.14";
+  const pnlKrw=cp?(cp-PORTFOLIO.avg_price_krw)*PORTFOLIO.shares:-1657316;
+  const pnlC=parseFloat(pnlPct)>=0?"#00e676":"#ff5252";
+  const acC=analysis?.action?.includes("SELL")?"#ff5252":analysis?.action==="BUY"?"#00e676":"#ffd740";
+  const fg=analysis?.fear_greed;
+  const Sp=({color="#00e676"})=><span style={{width:13,height:13,border:"2px solid #ffffff22",borderTop:`2px solid ${color}`,borderRadius:"50%",animation:"spin .7s linear infinite",display:"inline-block"}}/>;
 
-  // ── 계산값 ────────────────────────────────────────────────────
-  const cp     = analysis?.current_price_krw;
-  const evalNow = cp ? cp * PORTFOLIO.shares : PORTFOLIO.eval_amount;
-  const pnlPct  = cp ? ((cp / PORTFOLIO.avg_price_krw - 1) * 100).toFixed(2) : PORTFOLIO.unrealized_pct;
-  const pnlKrw  = cp ? (cp - PORTFOLIO.avg_price_krw) * PORTFOLIO.shares : -1657316;
-  const pnlColor = parseFloat(pnlPct) >= 0 ? "#00e676" : "#ff5252";
-  const acColor  = analysis?.action?.includes("SELL") ? "#ff5252" : analysis?.action === "BUY" ? "#00e676" : "#ffd740";
+  return(
+    <div style={{minHeight:"100vh",background:"#07070e",color:"#ccd6f6",fontFamily:"'IBM Plex Mono',monospace",paddingBottom:60,backgroundImage:"radial-gradient(ellipse at 10% 0%,#0d0d2b,transparent 50%),radial-gradient(ellipse at 90% 100%,#0a1a08,transparent 50%)"}}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap');
+        @keyframes spin{to{transform:rotate(360deg)}}@keyframes slide{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+        .card{background:#0e0e1e;border:1px solid #1e2240;border-radius:10px;padding:15px}.mkt{background:#0a0a1a;border:1px solid #1a1a30;border-radius:8px;padding:11px;text-align:center}
+        .btn{font-family:inherit;cursor:pointer;border-radius:7px;transition:all .2s;font-size:11px;letter-spacing:.8px;font-weight:600;padding:9px 16px}
+        .bg{background:#00e676;color:#050510;border:none}.bg:hover{background:#00c860;transform:translateY(-1px)}.bg:disabled{background:#1a3a2a;color:#2a5040;cursor:not-allowed;transform:none}
+        .bb{background:transparent;border:1px solid #4a90d9;color:#4a90d9}.bb:hover{background:#4a90d922}
+        .bp{background:transparent;border:1px solid #9c6de0;color:#9c6de0}.bp:hover{background:#9c6de022}
+        .bo{background:transparent;border:1px solid #3a4060;color:#7788aa}.bo:hover{border-color:#7788aa}
+        .mt{background:none;border:none;cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:1.5px;padding:10px 14px;border-bottom:2px solid transparent;transition:all .2s}
+        .mt.on{color:#00e676;border-bottom-color:#00e676}.mt:not(.on){color:#3a4060}.mt:hover:not(.on){color:#7788aa}
+        .st{background:none;border:none;cursor:pointer;font-family:inherit;font-size:10px;padding:8px 12px;border-bottom:2px solid transparent;transition:all .2s}
+        .st.on{color:#00e676;border-bottom-color:#00e676}.st:not(.on){color:#3a4060}
+        .lr{font-size:10px;padding:3px 0;border-bottom:1px solid #0c0c1a;animation:slide .2s ease;line-height:1.5}
+        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#1e2240;border-radius:2px}`}
+      </style>
 
-  return (
-    <div style={{ minHeight: "100vh", background: "#08080f", color: "#ccd6f6", fontFamily: "'IBM Plex Mono', monospace", paddingBottom: 60, backgroundImage: "radial-gradient(ellipse at 15% 0%, #0d0d2b, transparent 55%), radial-gradient(ellipse at 85% 90%, #0d1a0d, transparent 55%)" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;600;700&display=swap');
-        @keyframes spin  { to { transform: rotate(360deg); } }
-        @keyframes slide { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
-        .card  { background:#0e0e1e; border:1px solid #1e2240; border-radius:10px; padding:18px; }
-        .mtab  { background:none; border:none; cursor:pointer; font-family:inherit; font-size:12px; letter-spacing:1.5px; padding:10px 18px; border-bottom:2px solid transparent; transition:all .2s; }
-        .mtab.on  { color:#00e676; border-bottom-color:#00e676; }
-        .mtab:not(.on) { color:#3a4060; }
-        .mtab:hover:not(.on) { color:#7788aa; }
-        .stab  { background:none; border:none; cursor:pointer; font-family:inherit; font-size:11px; letter-spacing:1px; padding:8px 14px; border-bottom:2px solid transparent; transition:all .2s; }
-        .stab.on  { color:#00e676; border-bottom-color:#00e676; }
-        .stab:not(.on) { color:#3a4060; }
-        .btn   { font-family:inherit; cursor:pointer; border-radius:7px; transition:all .2s; font-size:12px; letter-spacing:1px; font-weight:600; }
-        .btn-g { background:#00e676; color:#050510; border:none; padding:10px 22px; }
-        .btn-g:hover { background:#00c860; transform:translateY(-1px); }
-        .btn-g:disabled { background:#1a3a2a; color:#2a5040; cursor:not-allowed; transform:none; }
-        .btn-b { background:transparent; border:1px solid #3a4060; color:#7788aa; padding:10px 16px; }
-        .btn-b:hover { border-color:#7788aa; }
-        .btn-w { background:transparent; border:1px solid #4a90d9; color:#4a90d9; padding:10px 16px; }
-        .btn-w:hover { background:#4a90d922; }
-        .log-r { font-size:10px; padding:3px 0; border-bottom:1px solid #0c0c1a; animation:slide .2s ease; line-height:1.5; }
-        ::-webkit-scrollbar{width:3px} ::-webkit-scrollbar-thumb{background:#1e2240;border-radius:2px}
-      `}</style>
-
-      {/* Header */}
-      <div style={{ background:"#0b0b18", borderBottom:"1px solid #1a1a30", padding:"14px 28px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-          <div style={{ width:34, height:34, background:"linear-gradient(135deg,#cc0000,#ff4444)", borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:900, color:"#fff", fontSize:15 }}>T</div>
+      {/* 헤더 */}
+      <div style={{background:"#0b0b18",borderBottom:"1px solid #1a1a30",padding:"11px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100}}>
+        <div style={{display:"flex",alignItems:"center",gap:11}}>
+          <div style={{width:30,height:30,background:"linear-gradient(135deg,#cc0000,#ff4444)",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#fff",fontSize:13}}>T</div>
           <div>
-            <div style={{ fontWeight:700, fontSize:16, color:"#fff" }}>TSLA AI Agent</div>
-            <div style={{ fontSize:10, color:"#3a4060", letterSpacing:"1.5px" }}>Young Oh · 한국투자증권 · 텔레그램 연결됨</div>
+            <div style={{fontWeight:700,fontSize:14,color:"#fff"}}>TSLA AI Agent <span style={{fontSize:8,color:"#3a4060"}}>v3.0</span></div>
+            <div style={{fontSize:8,color:"#3a4060",letterSpacing:"1.5px"}}>Young Oh · 한국투자증권 · 텔레그램 연결됨</div>
           </div>
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-          <span style={{ fontSize:10, color:"#00e676", display:"flex", alignItems:"center", gap:5 }}>
-            <span style={{ width:7, height:7, borderRadius:"50%", background:"#00e676", display:"inline-block", animation:"pulse 1.5s infinite" }} />
-            텔레그램 활성
-          </span>
-          {lastUpdated && <span style={{ fontSize:10, color:"#3a4060" }}>{lastUpdated.toLocaleTimeString("ko-KR")}</span>}
+        <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+          {analysis?.usd_krw&&<span style={{fontSize:12,color:"#ffd740",fontWeight:700}}>₩{analysis.usd_krw.toLocaleString()}</span>}
+          {analysis?.tsla_usd&&<span style={{fontSize:12,color:"#00e676",fontWeight:700}}>${analysis.tsla_usd}</span>}
+          {fg&&<span style={{fontSize:11,color:fgColor(fg),fontWeight:700}}>{fgLabel(fg)} {fg}</span>}
+          <span style={{fontSize:8,color:"#00e676",display:"flex",alignItems:"center",gap:4}}><span style={{width:6,height:6,borderRadius:"50%",background:"#00e676",display:"inline-block",animation:"pulse 1.5s infinite"}}/>텔레그램</span>
+          {lastUp&&<span style={{fontSize:8,color:"#3a4060"}}>{lastUp.toLocaleTimeString("ko-KR")}</span>}
         </div>
       </div>
 
-      <div style={{ maxWidth:1080, margin:"0 auto", padding:"20px 20px 0" }}>
+      <div style={{maxWidth:1100,margin:"0 auto",padding:"16px 16px 0"}}>
 
-        {/* Portfolio */}
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:16 }}>
-          {[
-            { label:"평가금액",  value:fmt(evalNow),                          sub:"KIS 해외주식",           color:"#fff" },
-            { label:"평가손익",  value:`${parseFloat(pnlPct)>=0?"+":""}${pnlPct}%`, sub:fmt(Math.abs(pnlKrw)),  color:pnlColor },
-            { label:"보유주수",  value:`${PORTFOLIO.shares}주`,               sub:`평균 ${fmt(PORTFOLIO.avg_price_krw)}`, color:"#ccd6f6" },
-            { label:"손절라인", value:fmt(STOP_LOSS_KRW),                     sub:"평균단가 -7%",            color:"#ff5252" },
-          ].map((s,i) => (
-            <div key={i} className="card" style={{ textAlign:"center" }}>
-              <div style={{ fontSize:9, color:"#3a4060", letterSpacing:"1.5px", marginBottom:5 }}>{s.label}</div>
-              <div style={{ fontSize:17, fontWeight:700, color:s.color }}>{s.value}</div>
-              <div style={{ fontSize:10, color:"#5566aa", marginTop:3 }}>{s.sub}</div>
+        {/* 포트폴리오 */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9,marginBottom:12}}>
+          {[{l:"평가금액",v:fmt(evalNow),s:"KIS 해외주식",c:"#fff"},{l:"평가손익",v:fmtPct(parseFloat(pnlPct)),s:fmt(Math.abs(pnlKrw)),c:pnlC},{l:"보유주수",v:`${PORTFOLIO.shares}주`,s:`평균 ${fmt(PORTFOLIO.avg_price_krw)}`,c:"#ccd6f6"},{l:"손절라인",v:fmt(STOP_LOSS_KRW),s:"평균단가 -7%",c:"#ff5252"}].map((s,i)=>(
+            <div key={i} className="card" style={{textAlign:"center"}}>
+              <div style={{fontSize:8,color:"#3a4060",letterSpacing:"1.5px",marginBottom:4}}>{s.l}</div>
+              <div style={{fontSize:15,fontWeight:700,color:s.c}}>{s.v}</div>
+              <div style={{fontSize:9,color:"#5566aa",marginTop:2}}>{s.s}</div>
             </div>
           ))}
         </div>
 
-        {/* Controls */}
-        <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap", alignItems:"center" }}>
-          <button className="btn btn-g" onClick={() => runSignal(false)} disabled={loading} style={{ display:"flex", alignItems:"center", gap:8 }}>
-            {loading ? <span style={{ width:13,height:13,border:"2px solid #05051022",borderTop:"2px solid #050510",borderRadius:"50%",animation:"spin .7s linear infinite",display:"inline-block" }} /> : "⚡"}
-            {loading ? "분석 중..." : "AI 신호 분석"}
-          </button>
-          <button className="btn btn-w" onClick={runWeekly} disabled={weeklyLoading} style={{ display:"flex", alignItems:"center", gap:8 }}>
-            {weeklyLoading ? <span style={{ width:13,height:13,border:"2px solid #4a90d944",borderTop:"2px solid #4a90d9",borderRadius:"50%",animation:"spin .7s linear infinite",display:"inline-block" }} /> : "📋"}
-            {weeklyLoading ? "생성 중..." : "주간 리포트"}
-          </button>
-          <button className="btn btn-b" onClick={() => setAutoMode(p=>!p)} style={{ borderColor: autoMode?"#00e676":"#3a4060", color:autoMode?"#00e676":"#7788aa", animation:autoMode?"pulse 2s infinite":"none" }}>
-            {autoMode ? `⏹ 자동 OFF (${autoMin}분)` : "🤖 자동 ON"}
-          </button>
-          {autoMode && (
-            <select value={autoMin} onChange={e=>setAutoMin(Number(e.target.value))} style={{ background:"#0e0e1e", border:"1px solid #1e2240", borderRadius:6, padding:"9px 10px", color:"#ccd6f6", fontFamily:"inherit", fontSize:11 }}>
-              <option value={15}>15분</option>
-              <option value={30}>30분</option>
-              <option value={60}>1시간</option>
-              <option value={240}>4시간</option>
-            </select>
-          )}
-          <span style={{ marginLeft:"auto", fontSize:10, color:"#3a4060" }}>주간 리포트: 매주 월요일 자동 실행</span>
+        {/* 실시간 시장 데이터 */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,marginBottom:12}}>
+          <div className="mkt"><div style={{fontSize:8,color:"#3a4060",marginBottom:3}}>TSLA (USD)</div><div style={{fontSize:15,fontWeight:700,color:"#fff"}}>{analysis?.tsla_usd?fmtUsd(analysis.tsla_usd):"—"}</div><div style={{fontSize:9,color:"#5566aa"}}>{analysis?.tsla_krw?fmt(analysis.tsla_krw):"KRW —"}</div></div>
+          <div className="mkt"><div style={{fontSize:8,color:"#3a4060",marginBottom:3}}>원/달러</div><div style={{fontSize:15,fontWeight:700,color:"#ffd740"}}>{analysis?.usd_krw?`₩${analysis.usd_krw.toLocaleString()}`:"—"}</div><div style={{fontSize:9,color:"#5566aa"}}>USD/KRW</div></div>
+          <div className="mkt"><div style={{fontSize:8,color:"#3a4060",marginBottom:3}}>S&P 500</div><div style={{fontSize:15,fontWeight:700,color:"#fff"}}>{analysis?.sp500?fmtNum(analysis.sp500):"—"}</div><div style={{fontSize:9,color:analysis?.sp500_chg_pct>=0?"#00e676":"#ff5252"}}>{analysis?.sp500_chg_pct!==undefined?fmtPct(analysis.sp500_chg_pct):"—"}</div></div>
+          <div className="mkt"><div style={{fontSize:8,color:"#3a4060",marginBottom:3}}>나스닥</div><div style={{fontSize:15,fontWeight:700,color:"#fff"}}>{analysis?.nasdaq?fmtNum(analysis.nasdaq):"—"}</div><div style={{fontSize:9,color:analysis?.nasdaq_chg_pct>=0?"#00e676":"#ff5252"}}>{analysis?.nasdaq_chg_pct!==undefined?fmtPct(analysis.nasdaq_chg_pct):"—"}</div></div>
+          <div className="mkt"><div style={{fontSize:8,color:"#3a4060",marginBottom:3}}>공포탐욕지수</div><div style={{fontSize:22,fontWeight:900,color:fgColor(fg)}}>{fg||"—"}</div><div style={{fontSize:9,color:fgColor(fg)}}>{fgLabel(fg)}</div></div>
         </div>
 
-        {/* Main Tabs */}
-        <div style={{ display:"flex", borderBottom:"1px solid #1a1a30", marginBottom:14 }}>
-          {[["signal","📡 실시간 신호"],["weekly","📊 주간 리포트"]].map(([t,l])=>(
-            <button key={t} className={`mtab ${mainTab===t?"on":""}`} onClick={()=>setMainTab(t)}>{l}</button>
+        {/* 버튼 */}
+        <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+          <button className="btn bg" onClick={()=>runSignal(false)} disabled={loading} style={{display:"flex",alignItems:"center",gap:6}}>{loading?<Sp/>:"⚡"}{loading?"분석 중...":"AI 신호 분석"}</button>
+          <button className="btn bb" onClick={runMorning} disabled={mLoad} style={{display:"flex",alignItems:"center",gap:6}}>{mLoad?<Sp color="#4a90d9"/>:"🌅"}{mLoad?"생성 중...":"아침 브리핑"}</button>
+          <button className="btn bp" onClick={runWeekly} disabled={wLoad} style={{display:"flex",alignItems:"center",gap:6}}>{wLoad?<Sp color="#9c6de0"/>:"📋"}{wLoad?"생성 중...":"주간 리포트"}</button>
+          <button className="btn bo" onClick={()=>setAutoMode(p=>!p)} style={{borderColor:autoMode?"#00e676":"#3a4060",color:autoMode?"#00e676":"#7788aa"}}>{autoMode?`⏹ 자동 OFF (${autoMin}분)`:"🤖 자동 ON"}</button>
+          {autoMode&&<select value={autoMin} onChange={e=>setAutoMin(Number(e.target.value))} style={{background:"#0e0e1e",border:"1px solid #1e2240",borderRadius:6,padding:"8px 10px",color:"#ccd6f6",fontFamily:"inherit",fontSize:11}}><option value={15}>15분</option><option value={30}>30분</option><option value={60}>1시간</option><option value={240}>4시간</option></select>}
+          <span style={{marginLeft:"auto",fontSize:8,color:"#3a4060"}}>🌅 09:00 자동 브리핑 · 📋 월요일 자동 리포트</span>
+        </div>
+
+        {/* 탭 */}
+        <div style={{display:"flex",borderBottom:"1px solid #1a1a30",marginBottom:12}}>
+          {[["signal","📡 실시간 신호"],["morning","🌅 아침 브리핑"],["weekly","📋 주간 리포트"]].map(([t,l])=>(
+            <button key={t} className={`mt ${mainTab===t?"on":""}`} onClick={()=>setMainTab(t)}>{l}</button>
           ))}
         </div>
 
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 300px", gap:14 }}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 270px",gap:12}}>
           <div>
-            {/* ── 실시간 신호 탭 ── */}
-            {mainTab === "signal" && (
-              <>
-                {!analysis && !loading && (
-                  <div className="card" style={{ textAlign:"center", padding:"50px 20px" }}>
-                    <div style={{ fontSize:36, marginBottom:14 }}>📡</div>
-                    <div style={{ color:"#3a4060", fontSize:13, lineHeight:1.8 }}>
-                      <b style={{color:"#ccd6f6"}}>⚡ AI 신호 분석</b> 버튼으로 실시간 매매 신호<br/>
-                      <b style={{color:"#ccd6f6"}}>📋 주간 리포트</b> 버튼으로 심층 분석<br/>
-                      <b style={{color:"#ccd6f6"}}>🤖 자동 ON</b> 으로 주기적 자동 알림
+            {/* 실시간 신호 탭 */}
+            {mainTab==="signal"&&<>
+              {!analysis&&!loading&&<div className="card" style={{textAlign:"center",padding:"44px 20px"}}><div style={{fontSize:34,marginBottom:12}}>📡</div><div style={{color:"#3a4060",fontSize:12,lineHeight:2}}><b style={{color:"#ccd6f6"}}>⚡ AI 신호 분석</b> — 실시간 매매 신호 + 환율 + 지수<br/><b style={{color:"#ccd6f6"}}>🌅 아침 브리핑</b> — 매일 09시 자동<br/><b style={{color:"#ccd6f6"}}>📋 주간 리포트</b> — 매주 월요일 자동</div></div>}
+              {loading&&<div className="card" style={{padding:26}}>{["🔍 TSLA & 환율 수집...","📊 S&P500 / 나스닥 / 공포탐욕...","🌍 지정학 & 경제지표...","🧠 Claude AI 종합 판단..."].map((s,i)=><div key={i} style={{display:"flex",gap:12,padding:"9px 0",borderBottom:"1px solid #0c0c1e",animation:`slide .3s ease ${i*.1}s both`}}><span style={{width:12,height:12,border:"2px solid #1e2240",borderTop:"2px solid #00e676",borderRadius:"50%",animation:"spin .8s linear infinite",flexShrink:0,marginTop:2}}/><span style={{fontSize:12,color:"#7788aa"}}>{s}</span></div>)}</div>}
+              {analysis&&!loading&&<div style={{animation:"slide .4s ease"}}>
+                <div className="card" style={{marginBottom:10,background:`${acC}0d`,borderColor:`${acC}44`}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+                    <div style={{display:"flex",alignItems:"center",gap:18}}>
+                      <div style={{fontSize:38,fontWeight:900,color:acC,letterSpacing:"-2px"}}>{analysis.action}</div>
+                      <div><div style={{fontSize:8,color:"#3a4060"}}>확신도</div><div style={{fontSize:22,fontWeight:700,color:analysis.confidence>=70?"#00e676":analysis.confidence>=40?"#ffd740":"#ff5252"}}>{analysis.confidence}%</div></div>
+                      <div><div style={{fontSize:8,color:"#3a4060"}}>긴급도</div><div style={{fontSize:13,fontWeight:700,color:analysis.urgency==="HIGH"?"#ff5252":analysis.urgency==="MEDIUM"?"#ffd740":"#00e676"}}>● {analysis.urgency}</div></div>
+                      {analysis.position_change&&<div><div style={{fontSize:8,color:"#3a4060"}}>액션</div><div style={{fontSize:11,color:"#fff"}}>{analysis.position_change}</div></div>}
                     </div>
+                    <div style={{textAlign:"right"}}><div style={{fontSize:8,color:"#3a4060"}}>목표 / 손절</div><div style={{fontSize:12}}><span style={{color:"#00e676"}}>{fmt(analysis.target_price_krw)}</span><span style={{color:"#3a4060"}}> / </span><span style={{color:"#ff5252"}}>{fmt(analysis.stop_loss_krw)}</span></div></div>
                   </div>
-                )}
-                {loading && (
-                  <div className="card" style={{ padding:30 }}>
-                    {["🔍 TSLA 현재가 수집...","🌍 지정학 리스크 분석...","📊 기술적 지표 계산...","🧠 Claude AI 종합 판단..."].map((s,i)=>(
-                      <div key={i} style={{ display:"flex", gap:12, padding:"10px 0", borderBottom:"1px solid #0c0c1e", animation:`slide .3s ease ${i*.12}s both` }}>
-                        <span style={{ width:14,height:14,border:"2px solid #1e2240",borderTop:"2px solid #00e676",borderRadius:"50%",animation:"spin .8s linear infinite",flexShrink:0,marginTop:2 }} />
-                        <span style={{ fontSize:12, color:"#7788aa" }}>{s}</span>
-                      </div>
-                    ))}
+                </div>
+                {analysis.telegram_message&&<div className="card" style={{marginBottom:10,background:"#0a1020",borderColor:"#2255aa44"}}><div style={{fontSize:8,color:"#4a90d9",letterSpacing:"2px",marginBottom:5}}>📨 텔레그램 발송 메시지</div><div style={{fontSize:12,color:"#aabbdd",lineHeight:1.7,whiteSpace:"pre-line"}}>{analysis.telegram_message}</div></div>}
+                <div className="card" style={{padding:0}}>
+                  <div style={{display:"flex",borderBottom:"1px solid #1a1a30",padding:"0 12px"}}>
+                    {[["signal","📊 시그널"],["risks","⚠️ 리스크"],["reason","🧠 근거"]].map(([t,l])=><button key={t} className={`st ${sigTab===t?"on":""}`} onClick={()=>setSigTab(t)}>{l}</button>)}
                   </div>
-                )}
-                {analysis && !loading && (
-                  <div style={{ animation:"slide .4s ease" }}>
-                    <div className="card" style={{ marginBottom:12, background:`${acColor}0d`, borderColor:`${acColor}44` }}>
-                      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
-                        <div style={{ display:"flex", alignItems:"center", gap:22 }}>
-                          <div style={{ fontSize:42, fontWeight:900, color:acColor, letterSpacing:"-2px" }}>{analysis.action}</div>
-                          <div><div style={{ fontSize:9,color:"#3a4060" }}>확신도</div><div style={{ fontSize:26,fontWeight:700,color:analysis.confidence>=70?"#00e676":analysis.confidence>=40?"#ffd740":"#ff5252" }}>{analysis.confidence}%</div></div>
-                          <div><div style={{ fontSize:9,color:"#3a4060" }}>긴급도</div><div style={{ fontSize:15,fontWeight:700,color:analysis.urgency==="HIGH"?"#ff5252":analysis.urgency==="MEDIUM"?"#ffd740":"#00e676" }}>● {analysis.urgency}</div></div>
-                          {analysis.position_change && <div><div style={{ fontSize:9,color:"#3a4060" }}>액션</div><div style={{ fontSize:12,color:"#fff" }}>{analysis.position_change}</div></div>}
-                        </div>
-                        <div style={{ textAlign:"right" }}>
-                          <div style={{ fontSize:9,color:"#3a4060" }}>현재가</div>
-                          <div style={{ fontSize:17,color:"#fff",fontWeight:700 }}>{fmt(analysis.current_price_krw)}</div>
-                          <div style={{ fontSize:9,color:"#3a4060",marginTop:5 }}>목표 / 손절</div>
-                          <div style={{ fontSize:13 }}><span style={{color:"#00e676"}}>{fmt(analysis.target_price_krw)}</span><span style={{color:"#3a4060"}}> / </span><span style={{color:"#ff5252"}}>{fmt(analysis.stop_loss_krw)}</span></div>
-                        </div>
-                      </div>
-                    </div>
+                  <div style={{padding:14}}>
+                    {sigTab==="signal"&&analysis.signal_breakdown&&<div style={{display:"grid",gap:12}}>{Object.entries(analysis.signal_breakdown).map(([k,v])=><div key={k}><div style={{fontSize:8,color:"#7788aa",marginBottom:4}}>{{"geopolitics":"🌍 세계 지정학","tesla_news":"🚗 테슬라 뉴스","technical":"📈 기술적 분석","macro":"💹 거시경제"}[k]}</div><ScoreBar score={v.score}/><div style={{fontSize:11,color:"#5566aa",marginTop:3,lineHeight:1.6}}>{v.summary}</div></div>)}</div>}
+                    {sigTab==="risks"&&<div>{analysis.key_risks?.map((r,i)=><div key={i} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:"1px solid #0c0c1e"}}><span style={{color:"#ff5252"}}>▸</span><span style={{fontSize:12,color:"#aabbcc",lineHeight:1.5}}>{r}</span></div>)}{analysis.next_trigger&&<div style={{marginTop:12,padding:11,background:"#0a1020",borderRadius:7,borderLeft:"3px solid #4a90d9"}}><div style={{fontSize:8,color:"#3a4060",marginBottom:3}}>📅 다음 이벤트</div><div style={{fontSize:12,color:"#7aabdd",lineHeight:1.6}}>{analysis.next_trigger}</div></div>}</div>}
+                    {sigTab==="reason"&&<p style={{fontSize:13,color:"#aabbcc",lineHeight:1.9,margin:0}}>{analysis.reasoning}</p>}
+                  </div>
+                </div>
+              </div>}
+            </>}
 
-                    {analysis.telegram_message && (
-                      <div className="card" style={{ marginBottom:12, background:"#0a1020", borderColor:"#2255aa44" }}>
-                        <div style={{ fontSize:9,color:"#4a90d9",letterSpacing:"2px",marginBottom:6 }}>📨 텔레그램 발송 메시지</div>
-                        <div style={{ fontSize:12,color:"#aabbdd",lineHeight:1.7,whiteSpace:"pre-line" }}>{analysis.telegram_message}</div>
-                      </div>
-                    )}
-
-                    <div className="card" style={{ padding:0 }}>
-                      <div style={{ display:"flex", borderBottom:"1px solid #1a1a30", padding:"0 14px" }}>
-                        {[["signal","📊 시그널"],["risks","⚠️ 리스크"],["reason","🧠 근거"]].map(([t,l])=>(
-                          <button key={t} className={`stab ${tab===t?"on":""}`} onClick={()=>setTab(t)}>{l}</button>
-                        ))}
-                      </div>
-                      <div style={{ padding:18 }}>
-                        {tab==="signal" && analysis.signal_breakdown && (
-                          <div style={{ display:"grid", gap:14 }}>
-                            {Object.entries(analysis.signal_breakdown).map(([k,v])=>(
-                              <div key={k}>
-                                <div style={{ fontSize:10,color:"#7788aa",marginBottom:5 }}>
-                                  {{"geopolitics":"🌍 세계 지정학","tesla_news":"🚗 테슬라 뉴스","technical":"📈 기술적 분석","macro":"💹 거시경제"}[k]}
-                                </div>
-                                <ScoreBar score={v.score} />
-                                <div style={{ fontSize:11,color:"#5566aa",marginTop:4,lineHeight:1.6 }}>{v.summary}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {tab==="risks" && (
-                          <div>
-                            {analysis.key_risks?.map((r,i)=>(
-                              <div key={i} style={{ display:"flex",gap:10,padding:"9px 0",borderBottom:"1px solid #0c0c1e" }}>
-                                <span style={{color:"#ff5252"}}>▸</span>
-                                <span style={{ fontSize:12,color:"#aabbcc",lineHeight:1.5 }}>{r}</span>
-                              </div>
-                            ))}
-                            {analysis.next_trigger && (
-                              <div style={{ marginTop:14,padding:12,background:"#0a1020",borderRadius:7,borderLeft:"3px solid #4a90d9" }}>
-                                <div style={{ fontSize:9,color:"#3a4060",marginBottom:4 }}>📅 다음 주목 이벤트</div>
-                                <div style={{ fontSize:12,color:"#7aabdd",lineHeight:1.6 }}>{analysis.next_trigger}</div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {tab==="reason" && (
-                          <p style={{ fontSize:13,color:"#aabbcc",lineHeight:1.9,margin:0 }}>{analysis.reasoning}</p>
-                        )}
-                      </div>
-                    </div>
+            {/* 아침 브리핑 탭 */}
+            {mainTab==="morning"&&<>
+              {mLoad&&<div className="card" style={{padding:26}}>{["🌅 오늘 시장 수집...","📊 지수 & 환율...","📰 테슬라 뉴스...","🧠 투자 전략 생성..."].map((s,i)=><div key={i} style={{display:"flex",gap:12,padding:"9px 0",borderBottom:"1px solid #0c0c1e",animation:`slide .3s ease ${i*.1}s both`}}><span style={{width:12,height:12,border:"2px solid #1e2240",borderTop:"2px solid #ffd740",borderRadius:"50%",animation:"spin .8s linear infinite",flexShrink:0,marginTop:2}}/><span style={{fontSize:12,color:"#7788aa"}}>{s}</span></div>)}</div>}
+              {!morning&&!mLoad&&<div className="card" style={{textAlign:"center",padding:"44px 20px"}}><div style={{fontSize:34,marginBottom:12}}>🌅</div><div style={{color:"#3a4060",fontSize:12,lineHeight:1.8}}>매일 오전 9시 자동 실행<br/><b style={{color:"#ccd6f6"}}>🌅 아침 브리핑</b> 버튼으로 즉시 실행</div></div>}
+              {morning&&!mLoad&&<div style={{display:"grid",gap:10,animation:"slide .4s ease"}}>
+                <div className="card" style={{background:"#0a1505",borderColor:"#ffd74044"}}>
+                  <div style={{fontSize:9,color:"#ffd740",letterSpacing:"2px",marginBottom:10}}>🌅 {morning.date} 아침 브리핑</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+                    {[{l:"TSLA",v:fmtUsd(morning.tsla_usd),s:fmtPct(morning.tsla_chg_pct),c:morning.tsla_chg_pct>=0?"#00e676":"#ff5252"},{l:"원/달러",v:`₩${morning.usd_krw?.toLocaleString()}`,s:fmtPct(morning.usd_krw_chg_pct),c:morning.usd_krw_chg_pct>=0?"#ff5252":"#00e676"},{l:"S&P500",v:fmtNum(morning.sp500),s:fmtPct(morning.sp500_chg_pct),c:morning.sp500_chg_pct>=0?"#00e676":"#ff5252"},{l:"나스닥",v:fmtNum(morning.nasdaq),s:fmtPct(morning.nasdaq_chg_pct),c:morning.nasdaq_chg_pct>=0?"#00e676":"#ff5252"}].map((s,i)=><div key={i} style={{textAlign:"center",padding:"9px",background:"#0c0c1e",borderRadius:7}}><div style={{fontSize:8,color:"#3a4060",marginBottom:3}}>{s.l}</div><div style={{fontSize:13,fontWeight:700,color:"#fff"}}>{s.v}</div><div style={{fontSize:10,color:s.c}}>{s.s}</div></div>)}
                   </div>
-                )}
-              </>
-            )}
+                </div>
+                {morning.today_events?.length>0&&<div className="card"><div style={{fontSize:8,color:"#ffd740",letterSpacing:"2px",marginBottom:9}}>📅 오늘의 경제 일정</div>{morning.today_events.map((e,i)=><div key={i} style={{display:"flex",gap:10,padding:"7px 0",borderBottom:"1px solid #0c0c1e"}}><span style={{color:"#ffd740"}}>▸</span><span style={{fontSize:12,color:"#aabbcc"}}>{e}</span></div>)}</div>}
+                {morning.tsla_news?.length>0&&<div className="card"><div style={{fontSize:8,color:"#ff4444",letterSpacing:"2px",marginBottom:9}}>📰 테슬라 뉴스</div>{morning.tsla_news.map((n,i)=><div key={i} style={{display:"flex",gap:10,padding:"7px 0",borderBottom:"1px solid #0c0c1e"}}><span style={{color:"#ff4444"}}>▸</span><span style={{fontSize:12,color:"#aabbcc"}}>{n}</span></div>)}</div>}
+                {morning.strategy&&<div className="card" style={{borderLeft:"3px solid #00e676"}}><div style={{fontSize:8,color:"#00e676",letterSpacing:"2px",marginBottom:7}}>💡 오늘의 투자 전략</div><p style={{fontSize:13,color:"#aabbcc",lineHeight:1.8,margin:0}}>{morning.strategy}</p></div>}
+              </div>}
+            </>}
 
-            {/* ── 주간 리포트 탭 ── */}
-            {mainTab === "weekly" && (
-              <>
-                {weeklyLoading && (
-                  <div className="card" style={{ padding:30 }}>
-                    {["🔍 테슬라 주간 뉴스 수집...","🌍 세계 지정학 분석...","💹 거시경제 지표 수집...","📊 EV 경쟁 분석...","🧠 주간 종합 리포트 생성..."].map((s,i)=>(
-                      <div key={i} style={{ display:"flex",gap:12,padding:"10px 0",borderBottom:"1px solid #0c0c1e",animation:`slide .3s ease ${i*.1}s both` }}>
-                        <span style={{ width:14,height:14,border:"2px solid #1e2240",borderTop:"2px solid #4a90d9",borderRadius:"50%",animation:"spin .8s linear infinite",flexShrink:0,marginTop:2 }} />
-                        <span style={{ fontSize:12,color:"#7788aa" }}>{s}</span>
-                      </div>
-                    ))}
+            {/* 주간 리포트 탭 */}
+            {mainTab==="weekly"&&<>
+              {wLoad&&<div className="card" style={{padding:26}}>{["🔍 테슬라 주간 뉴스...","🌍 세계 지정학...","💹 거시경제 지표...","📊 EV 경쟁...","🧠 주간 리포트 생성..."].map((s,i)=><div key={i} style={{display:"flex",gap:12,padding:"9px 0",borderBottom:"1px solid #0c0c1e",animation:`slide .3s ease ${i*.1}s both`}}><span style={{width:12,height:12,border:"2px solid #1e2240",borderTop:"2px solid #9c6de0",borderRadius:"50%",animation:"spin .8s linear infinite",flexShrink:0,marginTop:2}}/><span style={{fontSize:12,color:"#7788aa"}}>{s}</span></div>)}</div>}
+              {!weekly&&!wLoad&&<div className="card" style={{textAlign:"center",padding:"44px 20px"}}><div style={{fontSize:34,marginBottom:12}}>📊</div><div style={{color:"#3a4060",fontSize:12,lineHeight:1.8}}>매주 월요일 자동 실행<br/><b style={{color:"#ccd6f6"}}>📋 주간 리포트</b> 버튼으로 즉시 실행</div></div>}
+              {weekly&&!wLoad&&<div style={{display:"grid",gap:10,animation:"slide .4s ease"}}>
+                <div className="card" style={{background:weekly.weekly_action==="BUY"?"#00e6760d":"#ff52520d",borderColor:weekly.weekly_action==="BUY"?"#00e67644":"#ff525244"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:14}}><div style={{fontSize:34,fontWeight:900,color:weekly.weekly_action==="BUY"?"#00e676":"#ff5252",letterSpacing:"-2px"}}>{weekly.weekly_action}</div><div><div style={{fontSize:8,color:"#3a4060"}}>주간 확신도</div><div style={{fontSize:22,fontWeight:700,color:"#ccd6f6"}}>{weekly.weekly_confidence}%</div></div></div>
+                    {weekly.price_range&&<div style={{textAlign:"right"}}><div style={{fontSize:8,color:"#3a4060"}}>지지 / 저항</div><div style={{fontSize:12}}><span style={{color:"#00e676"}}>{fmt(weekly.price_range.support)}</span><span style={{color:"#3a4060"}}> / </span><span style={{color:"#ff5252"}}>{fmt(weekly.price_range.resistance)}</span></div><div style={{fontSize:8,color:"#5566aa",marginTop:2}}>{weekly.week}</div></div>}
                   </div>
-                )}
-                {!weekly && !weeklyLoading && (
-                  <div className="card" style={{ textAlign:"center", padding:"50px 20px" }}>
-                    <div style={{ fontSize:36,marginBottom:14 }}>📊</div>
-                    <div style={{ color:"#3a4060",fontSize:13,lineHeight:1.8 }}>
-                      <b style={{color:"#ccd6f6"}}>📋 주간 리포트</b> 버튼으로<br/>
-                      테슬라 + 세계 금융 심층 분석<br/>
-                      <span style={{fontSize:11}}>매주 월요일 자동 실행됩니다</span>
-                    </div>
-                  </div>
-                )}
-                {weekly && !weeklyLoading && (
-                  <div style={{ animation:"slide .4s ease", display:"grid", gap:12 }}>
-                    {/* 헤더 */}
-                    <div className="card" style={{ background:weekly.weekly_action==="BUY"?"#00e6760d":weekly.weekly_action?.includes("SELL")?"#ff52520d":"#ffd7400d", borderColor:weekly.weekly_action==="BUY"?"#00e67644":weekly.weekly_action?.includes("SELL")?"#ff525244":"#ffd74044" }}>
-                      <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
-                        <div>
-                          <div style={{ fontSize:9,color:"#3a4060",marginBottom:4 }}>주간 판단</div>
-                          <div style={{ fontSize:36,fontWeight:900,color:weekly.weekly_action==="BUY"?"#00e676":weekly.weekly_action?.includes("SELL")?"#ff5252":"#ffd740",letterSpacing:"-2px" }}>{weekly.weekly_action}</div>
-                        </div>
-                        <div style={{ textAlign:"right" }}>
-                          <div style={{ fontSize:9,color:"#3a4060" }}>주간 확신도</div>
-                          <div style={{ fontSize:28,fontWeight:700,color:"#ccd6f6" }}>{weekly.weekly_confidence}%</div>
-                          <div style={{ fontSize:10,color:"#5566aa",marginTop:4 }}>{weekly.week}</div>
-                        </div>
-                        {weekly.price_range && (
-                          <div style={{ textAlign:"right" }}>
-                            <div style={{ fontSize:9,color:"#3a4060" }}>지지 / 저항</div>
-                            <div style={{ fontSize:13 }}><span style={{color:"#00e676"}}>{fmt(weekly.price_range.support)}</span><span style={{color:"#3a4060"}}> / </span><span style={{color:"#ff5252"}}>{fmt(weekly.price_range.resistance)}</span></div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {[
-                      { key:"tsla_summary",   label:"🚗 테슬라 주요 이슈",   color:"#ff4444" },
-                      { key:"market_summary", label:"💹 거시경제 & 지정학",  color:"#4a90d9" },
-                      { key:"ev_competition", label:"⚡ EV 경쟁 현황",       color:"#00e676" },
-                      { key:"technical_outlook",label:"📈 기술적 전망",      color:"#ffd740" },
-                    ].map(({ key, label, color }) => weekly[key] && (
-                      <div key={key} className="card" style={{ borderLeft:`3px solid ${color}44` }}>
-                        <div style={{ fontSize:10,color:color,letterSpacing:"1px",marginBottom:8 }}>{label}</div>
-                        <p style={{ fontSize:12,color:"#aabbcc",lineHeight:1.8,margin:0 }}>{weekly[key]}</p>
-                      </div>
-                    ))}
-
-                    {weekly.key_events_next_week && (
-                      <div className="card">
-                        <div style={{ fontSize:10,color:"#ffd740",letterSpacing:"1px",marginBottom:10 }}>📅 다음 주 주목 이벤트</div>
-                        {weekly.key_events_next_week.map((e,i)=>(
-                          <div key={i} style={{ display:"flex",gap:10,padding:"7px 0",borderBottom:"1px solid #0c0c1e" }}>
-                            <span style={{color:"#ffd740"}}>▸</span>
-                            <span style={{ fontSize:12,color:"#aabbcc" }}>{e}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
+                </div>
+                {[{k:"tsla_summary",l:"🚗 테슬라 주요 이슈",c:"#ff4444"},{k:"market_summary",l:"💹 거시경제 & 지정학",c:"#4a90d9"},{k:"ev_competition",l:"⚡ EV 경쟁 현황",c:"#00e676"},{k:"technical_outlook",l:"📈 기술적 전망",c:"#ffd740"}].map(({k,l,c})=>weekly[k]&&<div key={k} className="card" style={{borderLeft:`3px solid ${c}44`}}><div style={{fontSize:8,color:c,letterSpacing:"1px",marginBottom:7}}>{l}</div><p style={{fontSize:12,color:"#aabbcc",lineHeight:1.8,margin:0}}>{weekly[k]}</p></div>)}
+                {weekly.key_events_next_week&&<div className="card"><div style={{fontSize:8,color:"#ffd740",letterSpacing:"1px",marginBottom:9}}>📅 다음 주 이벤트</div>{weekly.key_events_next_week.map((e,i)=><div key={i} style={{display:"flex",gap:10,padding:"7px 0",borderBottom:"1px solid #0c0c1e"}}><span style={{color:"#ffd740"}}>▸</span><span style={{fontSize:12,color:"#aabbcc"}}>{e}</span></div>)}</div>}
+              </div>}
+            </>}
           </div>
 
-          {/* 우측: 로그 */}
-          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
-            <div className="card" style={{ flex:1 }}>
-              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:10,paddingBottom:10,borderBottom:"1px solid #1a1a30" }}>
-                <span style={{ fontSize:9,letterSpacing:"2px",color:"#3a4060" }}>ACTIVITY LOG</span>
-                <button onClick={()=>setLog([])} style={{ background:"none",border:"none",color:"#2a3050",cursor:"pointer",fontSize:10 }}>clear</button>
+          {/* 우측 패널 */}
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <div className="card" style={{flex:1}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:9,paddingBottom:9,borderBottom:"1px solid #1a1a30"}}>
+                <span style={{fontSize:8,letterSpacing:"2px",color:"#3a4060"}}>ACTIVITY LOG</span>
+                <button onClick={()=>setLog([])} style={{background:"none",border:"none",color:"#2a3050",cursor:"pointer",fontSize:9}}>clear</button>
               </div>
-              <div ref={logRef} style={{ overflowY:"auto",maxHeight:380 }}>
-                {log.length===0 && <div style={{ textAlign:"center",color:"#2a3050",fontSize:10,padding:20 }}>대기 중...</div>}
-                {log.map((l,i)=>(
-                  <div key={i} className="log-r" style={{ color:{success:"#00e676",danger:"#ff5252",warn:"#ffd740",info:"#5566aa"}[l.type] }}>
-                    <span style={{color:"#2a3050"}}>[{l.time}] </span>{l.msg}
-                  </div>
-                ))}
+              <div ref={logRef} style={{overflowY:"auto",maxHeight:300}}>
+                {log.length===0&&<div style={{textAlign:"center",color:"#2a3050",fontSize:9,padding:14}}>대기 중...</div>}
+                {log.map((l,i)=><div key={i} className="lr" style={{color:{success:"#00e676",danger:"#ff5252",warn:"#ffd740",info:"#5566aa"}[l.type]}}><span style={{color:"#2a3050"}}>[{l.time}] </span>{l.msg}</div>)}
               </div>
             </div>
-
-            {/* 알림 현황 */}
             <div className="card">
-              <div style={{ fontSize:9,letterSpacing:"2px",color:"#3a4060",marginBottom:10 }}>알림 설정 현황</div>
-              {[
-                ["📨 텔레그램",        true,  "연결됨"],
-                ["🟢 BUY/SELL 신호",  true,  "활성"],
-                ["⚠️ 손절 경보 -5%",  true,  `${fmt(ALERT_KRW)}`],
-                ["🚨 손절라인 -7%",   true,  `${fmt(STOP_LOSS_KRW)}`],
-                ["📋 주간 리포트",    true,  "매주 월요일"],
-                ["🔄 정기 분석",      autoMode, autoMode?`${autoMin}분 간격`:"OFF"],
-              ].map(([l,ok,s],i)=>(
-                <div key={i} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #0c0c1e" }}>
-                  <span style={{ fontSize:10,color:"#7788aa" }}>{l}</span>
-                  <span style={{ fontSize:9,color:ok?"#00e676":"#3a4060" }}>● {s}</span>
+              <div style={{fontSize:8,letterSpacing:"2px",color:"#3a4060",marginBottom:9}}>알림 현황</div>
+              {[["📨 텔레그램",true,"연결됨"],["🟢 BUY/SELL",true,"활성"],["💱 환율 ±1%",true,"모니터링"],["🚗 TSLA ±3%",true,"모니터링"],["⚠️ 손절 -5%",true,fmt(ALERT_KRW)],["🚨 손절 -7%",true,fmt(STOP_LOSS_KRW)],["🌅 09:00 브리핑",true,"매일 자동"],["📋 주간 리포트",true,"월요일 자동"],["🔄 정기 분석",autoMode,autoMode?`${autoMin}분`:"OFF"]].map(([l,ok,s],i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #0c0c1e"}}>
+                  <span style={{fontSize:9,color:"#7788aa"}}>{l}</span>
+                  <span style={{fontSize:8,color:ok?"#00e676":"#3a4060"}}>● {s}</span>
                 </div>
               ))}
             </div>

@@ -1,4 +1,4 @@
-"use client";
+use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 
 const TG_TOKEN  = "8750913612:AAH3FLdPBv9uD0SEVqifi0htU7lKkISFVQM";
@@ -7,19 +7,28 @@ const PORTFOLIO = { shares: 70.355084, avg_price_krw: 568544, eval_amount: 38342
 const STOP_LOSS_KRW = Math.round(PORTFOLIO.avg_price_krw * 0.93);
 const ALERT_KRW     = Math.round(PORTFOLIO.avg_price_krw * 0.95);
 
-const SIGNAL_PROMPT = `당신은 테슬라(TSLA) 전문 퀀트 트레이더 AI입니다.
-【실제 보유 현황 - 한국투자증권 Young Oh】
-- 보유수량: 70.355084주 / 평균구매가: ₩568,544 / 손절라인: ₩528,746 (-7%)
-웹 검색으로 ①TSLA 현재가(USD) ②원달러 환율 ③S&P500/나스닥 ④공포탐욕지수 ⑤테슬라 뉴스 ⑥경제지표를 수집 후 JSON으로만 응답:
-{"action":"BUY"|"SELL"|"HOLD"|"PARTIAL_SELL","confidence":0~100,"urgency":"LOW"|"MEDIUM"|"HIGH","tsla_usd":숫자,"tsla_krw":숫자,"usd_krw":숫자,"sp500":숫자,"sp500_chg_pct":숫자,"nasdaq":숫자,"nasdaq_chg_pct":숫자,"fear_greed":숫자,"fear_greed_label":"문자열","target_price_krw":숫자,"stop_loss_krw":숫자,"position_change":"설명","signal_breakdown":{"geopolitics":{"score":-10~10,"summary":"한국어"},"tesla_news":{"score":-10~10,"summary":"한국어"},"technical":{"score":-10~10,"summary":"한국어"},"macro":{"score":-10~10,"summary":"한국어"}},"key_risks":["리스크1","리스크2","리스크3"],"reasoning":"한국어 250자 이내","telegram_message":"3줄 이내 알림 이모지 포함","next_trigger":"다음 이벤트"}`;
+const SIGNAL_PROMPT = `You are a Tesla (TSLA) quantitative trading AI. Respond ONLY with a valid JSON object, no other text.
 
-const MORNING_PROMPT = `당신은 Young Oh의 투자 AI 비서입니다.
-웹 검색으로 오늘 아침 브리핑 데이터를 수집 후 JSON으로만 응답:
-{"date":"날짜","tsla_usd":숫자,"tsla_krw":숫자,"tsla_chg_pct":숫자,"usd_krw":숫자,"usd_krw_chg_pct":숫자,"sp500":숫자,"sp500_chg_pct":숫자,"nasdaq":숫자,"nasdaq_chg_pct":숫자,"fear_greed":숫자,"fear_greed_label":"문자열","today_events":["이벤트1","이벤트2"],"tsla_news":["뉴스1","뉴스2","뉴스3"],"strategy":"오늘 투자 전략 200자 이내","telegram_morning":"아침 브리핑 5줄 이내 이모지 포함"}`;
+Portfolio: 70.355 shares, avg cost ₩568,544, stop loss ₩528,746 (-7%)
 
-const WEEKLY_PROMPT = `당신은 테슬라(TSLA) 전문 애널리스트입니다.
-웹 검색으로 이번 주 종합 분석 후 JSON으로만 응답:
-{"week":"YYYY-MM-DD 주간","tsla_summary":"테슬라 주요 이슈 3~5줄","market_summary":"거시경제 지정학 3~5줄","ev_competition":"EV 경쟁 2~3줄","technical_outlook":"기술적 전망 2~3줄","weekly_action":"BUY"|"SELL"|"HOLD","weekly_confidence":0~100,"price_range":{"support":숫자,"resistance":숫자},"key_events_next_week":["이벤트1","이벤트2","이벤트3"],"telegram_weekly":"주간 리포트 요약 5줄 이내 이모지 포함"}`;
+Based on your knowledge of Tesla, global markets, and current economic conditions, return this exact JSON:
+{"action":"HOLD","confidence":75,"urgency":"LOW","tsla_usd":280,"tsla_krw":385000,"usd_krw":1374,"sp500":5600,"sp500_chg_pct":0.5,"nasdaq":17800,"nasdaq_chg_pct":0.8,"fear_greed":55,"fear_greed_label":"Neutral","target_price_krw":420000,"stop_loss_krw":528746,"position_change":"현재 포지션 유지","signal_breakdown":{"geopolitics":{"score":0,"summary":"지정학적 리스크 보통 수준"},"tesla_news":{"score":0,"summary":"테슬라 최근 동향 분석"},"technical":{"score":0,"summary":"기술적 지표 중립"},"macro":{"score":0,"summary":"거시경제 보통 수준"}},"key_risks":["금리 변동성","테슬라 경쟁 심화","원달러 환율 변동"],"reasoning":"현재 시장 상황을 종합적으로 분석한 결과입니다.","telegram_message":"🟡 TSLA HOLD\n현재가 분석 완료\n포지션 유지 권고","next_trigger":"다음 실적 발표"}
+
+Fill in realistic current values and analysis. Return ONLY the JSON, absolutely no other text.`;
+
+const MORNING_PROMPT = `You are an investment AI assistant for Young Oh. Respond ONLY with a valid JSON object.
+
+Return this exact JSON with realistic values based on your knowledge:
+{"date":"2025-03-28","tsla_usd":280,"tsla_krw":385000,"tsla_chg_pct":-1.2,"usd_krw":1374,"usd_krw_chg_pct":0.1,"sp500":5600,"sp500_chg_pct":0.5,"nasdaq":17800,"nasdaq_chg_pct":0.3,"fear_greed":55,"fear_greed_label":"Neutral","today_events":["연준 의사록 발표","테슬라 인도량 발표 예정"],"tsla_news":["테슬라 1분기 인도량 주목","모델Y 업데이트 소식","CEO 발언 관련 뉴스"],"strategy":"오늘은 시장 변동성에 주의하며 현재 포지션을 유지하는 것이 좋습니다.","telegram_morning":"🌅 오늘의 투자 브리핑\nTSLA: $280 (₩385,000)\n환율: ₩1,374\nS&P500: 5,600 (+0.5%)\n전략: 포지션 유지 권고"}
+
+Fill in today's actual realistic values. Return ONLY the JSON.`;
+
+const WEEKLY_PROMPT = `You are a Tesla analyst. Respond ONLY with a valid JSON object, no other text.
+
+Return this exact JSON with realistic weekly analysis:
+{"week":"2025-03-28 주간","tsla_summary":"테슬라 이번 주 주요 이슈 분석","market_summary":"글로벌 시장 및 거시경제 동향","ev_competition":"전기차 시장 경쟁 현황","technical_outlook":"기술적 분석 및 전망","weekly_action":"HOLD","weekly_confidence":65,"price_range":{"support":370000,"resistance":420000},"key_events_next_week":["실적 발표","인도량 데이터","연준 회의"],"telegram_weekly":"📊 주간 리포트\nTSLA 이번 주 분석 완료\n주간 판단: HOLD\n다음 주 주목 이벤트 확인"}
+
+Fill in realistic current analysis. Return ONLY the JSON.`;
 
 const fmt    = n => n ? `₩${Number(n).toLocaleString()}` : "—";
 const fmtUsd = n => n ? `$${Number(n).toFixed(2)}` : "—";

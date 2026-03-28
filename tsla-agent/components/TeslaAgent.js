@@ -32,7 +32,7 @@ async function sendTelegram(message) {
   try { await fetch("/api/telegram",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:TG_TOKEN,chatId:TG_CHAT_ID,message})}); } catch(_){}
 }
 async function callClaude(sys, usr) {
-  const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2500,tools:[{type:"web_search_20250305",name:"web_search"}],system:sys,messages:[{role:"user",content:usr}]})});
+  const res = await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({systemPrompt:sys,userMessage:usr})});
   const data = await res.json();
   const text = (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
   const m = text.match(/\{[\s\S]*\}/);

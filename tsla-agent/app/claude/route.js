@@ -1,3 +1,6 @@
+/ 파일 위치: tsla-agent/app/claude/route.js
+// 수정: 모델명 claude-3-5-haiku-20241022 → claude-haiku-4-5-20251001
+ 
 export async function POST(req) {
   try {
     const body = await req.json();
@@ -9,7 +12,7 @@ export async function POST(req) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-4-5-haiku-20251001",
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 2000,
         system: body.systemPrompt,
         messages: [{ role: "user", content: body.userMessage }],
@@ -25,3 +28,4 @@ export async function POST(req) {
     return Response.json({ error: e.message }, { status: 500 });
   }
 }
+ 

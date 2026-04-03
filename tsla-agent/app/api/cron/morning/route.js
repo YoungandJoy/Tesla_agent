@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 // tsla-agent/app/api/cron/morning/route.js
 // Vercel Cron: 01:00 UTC = 10:00 KST
 const TG_TOKEN = "8750913612:AAH3FLdPBv9uD0SEVqifiOhtU7lKkISFVQM";

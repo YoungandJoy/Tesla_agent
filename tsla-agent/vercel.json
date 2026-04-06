@@ -14,12 +14,4 @@
       "schedule": "0 0 * * 1"
     }
   ]
-}{
-  "framework": "nextjs",
-  "crons": [
-    {
-      "path": "/api/cron/morning",
-      "schedule": "0 1 * * *"
-    }
-  ]
 }
